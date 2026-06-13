@@ -1,14 +1,44 @@
 const TOPIC_CATEGORIES = ["钱放哪里", "钱留给什么目标", "港险怎么买、怎么用"];
+const SOURCE_TYPES = ["真人专业型", "真人营销型", "图文资料型", "AI素材型"];
 const ACCOUNT_STATUSES = ["全部", "核心监控", "重点跟踪", "选题参考", "新形式待观察"];
+
+const DEFAULT_PYRAMID = {
+  riskAwareness: {
+    title: "风险感知入口",
+    displayTitle: "环境变化下的钱放哪里",
+    userState: "被政策、账户、汇率、银行安全感或资产安全变化触发，但还没有明确方案需求。",
+    representativeTopics: ["银行卡冻结", "港卡开户", "美元资产", "CRS透明", "人民币贬值", "境外账户安全"],
+    insuranceConnection: "先帮助用户意识到钱需要按用途、期限和风险隔离重新分层，不直接讲产品。",
+    riskReminder: "人群较泛，需用资产门槛、长期资金用途和家庭目标过滤开卡、炒股及短期套利人群。"
+  },
+  fundArrangement: {
+    title: "资金安排入口",
+    displayTitle: "家庭目标下的钱怎么安排",
+    userState: "手里已有明确资金，开始比较银行、理财、保险、投资、还贷和留现金等不同选择。",
+    representativeTopics: ["50万怎么存", "100万怎么安排", "200万家庭资产分层", "退休现金流", "教育金", "家庭备用金"],
+    insuranceConnection: "适合切入资金分层、持有期限、领取安排、确定性、家庭目标和美元长期账户。",
+    riskReminder: "不能过早推产品，要先把钱的用途、期限和目标讲清楚。"
+  },
+  solutionComparison: {
+    title: "方案比较入口",
+    displayTitle: "港险方案到底怎么选",
+    userState: "已经接触过港险或类似方案，正在比较适配、流动性、收益真实性和购买安全感。",
+    representativeTopics: ["钱能不能拿回来", "前期退保会不会亏", "分红能否实现", "趸交还是分期", "计划书看什么", "不同方案为什么差很多"],
+    insuranceConnection: "适合承接计划书解读、预算判断、方案对比、购买前避坑和一对一咨询。",
+    riskReminder: "不能只讲产品优点，必须拆清适配条件、持有期限、退出成本和家庭目标。"
+  }
+};
 
 const state = {
   index: null,
   datasets: new Map(),
   latest: null,
-  filter: "全部",
+  todayCategory: "全部",
+  todayType: "全部",
   query: "",
   historyDate: "",
-  historyFilter: "全部",
+  historyCategory: "全部",
+  historyType: "全部",
   historyQuery: "",
   accountType: "全部",
   accountStatus: "全部",
@@ -21,24 +51,50 @@ const esc = value => String(value ?? "").replace(
   /[&<>"']/g,
   character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[character]
 );
-
 const searchable = item => Object.values(item || {}).join(" ").toLowerCase();
-const isPriority = topic => /立即|核心|高价值|值得拍|必做|优先/.test(topic.priority || "");
 
 function formatCnDate(date) {
   const [year, month, day] = String(date).split("-");
   return `${year}年${Number(month)}月${Number(day)}日`;
 }
 
-function recommendedSlot(topic) {
-  if (topic.accountSlot) return topic.accountSlot;
-  if (/后段|方案|产品比较|复核/.test(topic.stage || "")) return "真人主IP";
-  if (/立即|冲突|数字/.test(`${topic.priority || ""} ${topic.logic || ""}`)) return "真人营销账号";
-  return "矩阵号";
+function normalizeAccountType(value) {
+  const text = String(value || "").trim();
+  if (!text) return "未分类";
+  if (text === "真人专业型" || /真人专业|专业判断|专业顾问/.test(text)) return "真人专业型";
+  if (text === "真人营销型" || /真人营销|营销导流|强钩子|营销口播/.test(text)) return "真人营销型";
+  if (text === "图文资料型" || /图文|资料|清单|轮播|笔记/.test(text)) return "图文资料型";
+  if (text === "AI素材型" || text === "AI/素材型" || /AI|素材|混剪|PPT|无人出镜/.test(text)) return "AI素材型";
+  if (/真人|顾问|口播|实拍|对谈|固定机位|Vlog/.test(text)) return "真人专业型";
+  return "未分类";
 }
 
-function recommendation(topic) {
-  return topic.recommendation || topic.logic || topic.angle || topic.pain || "值得结合原视频证据进一步研究。";
+function sourceAccountType(topic, dataset) {
+  const explicit = topic.sourceAccountType || topic.accountType || topic.sourceType;
+  if (explicit) return normalizeAccountType(explicit);
+  const accountPool = [...(dataset?.accounts || []), ...(state.latest?.accounts || [])];
+  const matched = accountPool.find(account => account.name === topic.account);
+  if (matched) return normalizeAccountType(matched.type);
+  return normalizeAccountType(`${topic.format || ""} ${topic.video || ""}`);
+}
+
+function topicValueSignal(topic) {
+  if (topic.valueSignal) return topic.valueSignal;
+  const text = `${topic.heat || ""} ${topic.logic || ""}`;
+  if (/粉丝|低粉|账号仅|账号体量|显著高于/.test(text)) return "低粉爆款 / 账号异动";
+  if (/收藏/.test(text) && /分享/.test(text)) return "收藏分享信号";
+  if (/评论/.test(text) && /咨询|追问|计划书|想买|参数/.test(text)) return "评论咨询信号";
+  if (/图文|清单|流程|PPT|计算卡|结构/.test(`${text} ${topic.format || ""}`)) return "形式验证信号";
+  if (/政策|CRS|监管|合规/.test(text)) return "风险议题信号";
+  return "平台样本信号";
+}
+
+function operationObservation(topic) {
+  return topic.operationObservation
+    || topic.recommendation
+    || topic.logic
+    || topic.angle
+    || "暂无观察";
 }
 
 function topicStatus(topic) {
@@ -51,29 +107,13 @@ function accountFormat(account) {
     "真人专业型": "真人出镜 · 专业判断",
     "真人营销型": "真人出镜 · 高频营销测试",
     "图文资料型": "图文资料卡 · 低成本表达",
-    "AI/素材型": "AI/素材画面 · 旁白栏目"
+    "AI素材型": "AI/素材画面 · 旁白栏目"
   };
-  return formats[account.type] || account.type || "待观察的新形式";
+  return formats[normalizeAccountType(account.type)] || "待观察的新形式";
 }
 
 function accountBorrowDimension(account) {
   return account.borrowDimension || account.value || account.reason || "选题与表达结构";
-}
-
-function accountServiceTarget(account) {
-  if (account.serviceTarget) return account.serviceTarget;
-  const text = `${account.domain || ""} ${account.value || ""} ${account.reason || ""}`;
-  const targets = [];
-  if (/老板|企业|传承|潮汕/.test(text)) targets.push("思彤");
-  if (/女性|婚前|婚姻|家庭节点/.test(text)) targets.push("卡罗");
-  if (/养老|选择权|不婚|丁克|LGBT|全球|跨境|CRS/.test(text)) targets.push("熙纶");
-  if (/高净值|教育|计划书|产品比较|专业|复核/.test(text)) targets.push("特老师");
-  if (!targets.length) {
-    if (account.type === "真人营销型") return "真人营销账号";
-    if (["图文资料型", "AI/素材型"].includes(account.type)) return "低成本矩阵号";
-    return "真人主IP";
-  }
-  return [...new Set(targets)].join(" / ");
 }
 
 async function fetchJson(path) {
@@ -93,22 +133,38 @@ async function loadData() {
   state.index = await fetchJson("data/index.json");
   const dates = [...state.index.dates].sort().reverse();
   if (!dates.length || !state.index.latest) throw new Error("data/index.json 没有可用日期");
-
   state.latest = await getDataset(state.index.latest);
-  if (!state.latest) throw new Error(`最新日期 ${state.index.latest} 缺少数据文件`);
   state.historyDate = state.index.latest;
 }
 
 function renderMasthead() {
   document.title = `港险选题洞察看板｜${state.latest.date} ${state.latest.updatedAt}更新`;
-  elements.mastMeta.innerHTML = `<strong>${formatCnDate(state.latest.date)} · ${esc(state.latest.updatedAt)}更新</strong>抖音公开搜索样本 · 内部选题会使用<br>思彤 / 熙纶 / 卡罗 / 特老师`;
+  elements.mastMeta.innerHTML = `<strong>${formatCnDate(state.latest.date)} · ${esc(state.latest.updatedAt)}更新</strong>抖音公开搜索样本 · 港险内容选题情报库`;
 }
 
-function renderOverview() {
-  elements.summaryLabel.textContent = `今日核心判断 · 采集日期 ${state.latest.date}`;
-  elements.coreJudgment.textContent = state.latest.coreJudgment || "今日暂无单独核心判断，请直接查看入库选题。";
-  elements.selectionTitle.textContent = state.latest.selectionPrinciple?.title || "平台证据优先";
-  elements.selectionDetail.textContent = state.latest.selectionPrinciple?.detail || "以公开平台样本和业务启发决定是否入库，不设置固定数量。";
+function renderPyramid() {
+  const pyramid = state.latest.pyramid || DEFAULT_PYRAMID;
+  const levels = ["riskAwareness", "fundArrangement", "solutionComparison"];
+  elements.pyramidLabel.textContent = `今日选题金字塔 · 采集日期 ${state.latest.date}`;
+  elements.pyramidLevels.innerHTML = levels.map((key, index) => {
+    const level = { ...DEFAULT_PYRAMID[key], ...(pyramid[key] || {}) };
+    const topics = Array.isArray(level.representativeTopics) ? level.representativeTopics : [];
+    return `
+      <article class="pyramid-level pyramid-level-${index + 1}">
+        <div class="pyramid-level-index">0${index + 1}</div>
+        <div class="pyramid-level-body">
+          <span class="pyramid-stage">${esc(level.title)}</span>
+          <h3>${esc(level.displayTitle)}</h3>
+          <dl>
+            <div><dt>用户状态</dt><dd>${esc(level.userState)}</dd></div>
+            <div><dt>代表话题</dt><dd>${topics.map(topic => `<span class="topic-chip">${esc(topic)}</span>`).join("") || "暂无"}</dd></div>
+            <div><dt>港险连接</dt><dd>${esc(level.insuranceConnection)}</dd></div>
+            <div><dt>风险提醒</dt><dd>${esc(level.riskReminder)}</dd></div>
+          </dl>
+        </div>
+      </article>
+    `;
+  }).join("");
 }
 
 function renderSignals() {
@@ -141,31 +197,58 @@ function renderSignals() {
   `).join("") || '<li class="signal-placeholder">今日暂无新增话题共振。</li>';
 }
 
-function matchesTopic(topic, filter, query) {
-  const filterMatch = filter === "全部"
-    || topic.category === filter
-    || (filter === "动态专题" && String(topic.category).startsWith("专题｜"))
-    || String(topic.ip || "").includes(filter);
-  return filterMatch && searchable(topic).includes(query.toLowerCase());
+function matchesTopic(topic, dataset, category, sourceType, query) {
+  const categoryMatch = category === "全部"
+    || topic.category === category
+    || (category === "动态专题" && String(topic.category).startsWith("专题｜"));
+  const typeMatch = sourceType === "全部" || sourceAccountType(topic, dataset) === sourceType;
+  const derived = `${sourceAccountType(topic, dataset)} ${topicValueSignal(topic)} ${operationObservation(topic)}`;
+  return categoryMatch && typeMatch && `${searchable(topic)} ${derived}`.toLowerCase().includes(query.toLowerCase());
 }
 
-function topicCard(topic, index, date) {
+function renderTopicFilters(container, attribute, selected, values) {
+  container.innerHTML = values.map(value => `
+    <button class="filter ${value === selected ? "active" : ""}" ${attribute}="${esc(value)}">${esc(value)}</button>
+  `).join("");
+}
+
+function renderTodayFilters() {
+  const specials = (state.latest.topics || []).some(topic => String(topic.category).startsWith("专题｜"));
+  renderTopicFilters(
+    elements.todayCategoryFilters,
+    "data-today-category",
+    state.todayCategory,
+    ["全部", ...TOPIC_CATEGORIES, ...(specials ? ["动态专题"] : [])]
+  );
+  renderTopicFilters(elements.todayTypeFilters, "data-today-type", state.todayType, ["全部", ...SOURCE_TYPES]);
+}
+
+function renderHistoryFilters(dataset) {
+  const specials = (dataset?.topics || []).some(topic => String(topic.category).startsWith("专题｜"));
+  renderTopicFilters(
+    elements.historyCategoryFilters,
+    "data-history-category",
+    state.historyCategory,
+    ["全部", ...TOPIC_CATEGORIES, ...(specials ? ["动态专题"] : [])]
+  );
+  renderTopicFilters(elements.historyTypeFilters, "data-history-type", state.historyType, ["全部", ...SOURCE_TYPES]);
+}
+
+function topicCard(topic, index, date, dataset) {
   return `
-    <article class="card decision-card" tabindex="0" data-topic-index="${index}" data-date="${esc(date)}">
+    <article class="card intelligence-card" tabindex="0" data-topic-index="${index}" data-date="${esc(date)}">
       <div class="card-body">
         <div class="eyebrow">
-          <span class="badge">${esc(topic.category)}</span>
-          <span class="tag">${esc(topic.account)}</span>
-          ${isPriority(topic) ? '<span class="priority">优先研究</span>' : ""}
+          <span class="badge">${esc(topic.category || "未分类")}</span>
+          <span class="tag">${esc(topic.account || "未知账号")}</span>
+          <span class="tag">${esc(sourceAccountType(topic, dataset))}</span>
         </div>
-        <h3>${esc(topic.title)}</h3>
-        <dl class="decision-grid">
-          <div><dt>推荐IP</dt><dd>${esc(topic.ip)}</dd></div>
-          <div><dt>账号位置</dt><dd>${esc(recommendedSlot(topic))}</dd></div>
-          <div><dt>决策阶段</dt><dd>${esc(topic.stage)}</dd></div>
-          <div><dt>优先级</dt><dd>${esc(topic.priority)}</dd></div>
+        <h3>${esc(topic.title || "未命名选题")}</h3>
+        <dl class="intelligence-grid">
+          <div><dt>决策阶段</dt><dd>${esc(topic.stage || "暂无")}</dd></div>
+          <div><dt>选题价值信号</dt><dd>${esc(topicValueSignal(topic))}</dd></div>
         </dl>
-        <p class="recommendation"><strong>推荐理由</strong>${esc(recommendation(topic))}</p>
+        <p class="operation-observation"><strong>运营观察</strong>${esc(operationObservation(topic))}</p>
         <div class="card-bottom">
           ${topic.source === "临时洞察" ? '<span class="tag">临时洞察</span>' : ""}
           <span class="card-action">查看完整分析 →</span>
@@ -175,7 +258,7 @@ function topicCard(topic, index, date) {
   `;
 }
 
-function topicColumns(items, date) {
+function topicColumns(items, date, dataset) {
   const specials = [...new Set(items.map(topic => topic.category).filter(category => String(category).startsWith("专题｜")))];
   const categories = [...TOPIC_CATEGORIES.filter(category => items.some(topic => topic.category === category)), ...specials];
   const descriptions = {
@@ -183,7 +266,6 @@ function topicColumns(items, date) {
     "钱留给什么目标": "教育、养老、现金流与家庭任务",
     "港险怎么买、怎么用": "产品、计划书、领取与持单判断"
   };
-  const allTopics = state.datasets.get(date).topics;
 
   return `<div class="topic-columns">${categories.map(category => {
     const group = items.filter(topic => topic.category === category);
@@ -193,17 +275,17 @@ function topicColumns(items, date) {
           <h2>${esc(category)}</h2>
           <span>${esc(descriptions[category] || "当天形成平台信号的新问题")} · ${group.length}条</span>
         </div>
-        <div class="grid">${group.map(topic => topicCard(topic, allTopics.indexOf(topic), date)).join("")}</div>
+        <div class="grid">${group.map(topic => topicCard(topic, dataset.topics.indexOf(topic), date, dataset)).join("")}</div>
       </section>
     `;
   }).join("")}</div>`;
 }
 
-function bindTopicOpeners(root, selector = "[data-topic-index]") {
-  root.querySelectorAll(selector).forEach(element => {
+function bindTopicOpeners(root) {
+  root.querySelectorAll("[data-topic-index]").forEach(element => {
     const open = () => {
       const dataset = state.datasets.get(element.dataset.date);
-      openTopicDrawer(dataset.topics[Number(element.dataset.topicIndex)], element.dataset.date);
+      openTopicDrawer(dataset.topics[Number(element.dataset.topicIndex)], element.dataset.date, dataset);
     };
     element.addEventListener("click", open);
     element.addEventListener("keydown", event => {
@@ -216,10 +298,10 @@ function bindTopicOpeners(root, selector = "[data-topic-index]") {
 }
 
 function renderToday() {
-  const date = state.index.latest;
-  const topics = state.latest.topics || [];
-  const filtered = topics.filter(topic => matchesTopic(topic, state.filter, state.query));
-  elements.content.innerHTML = topicColumns(filtered, date);
+  const dataset = state.latest;
+  const topics = dataset.topics || [];
+  const filtered = topics.filter(topic => matchesTopic(topic, dataset, state.todayCategory, state.todayType, state.query));
+  elements.content.innerHTML = topicColumns(filtered, state.index.latest, dataset);
   elements.empty.style.display = filtered.length ? "none" : "block";
   bindTopicOpeners(elements.content);
 }
@@ -235,7 +317,14 @@ function renderHistoryDates() {
 function renderHistory() {
   const dataset = state.datasets.get(state.historyDate);
   const topics = dataset?.topics || [];
-  const filtered = topics.filter(topic => matchesTopic(topic, state.historyFilter, state.historyQuery));
+  const filtered = topics.filter(topic => matchesTopic(
+    topic,
+    dataset,
+    state.historyCategory,
+    state.historyType,
+    state.historyQuery
+  ));
+  renderHistoryFilters(dataset);
 
   elements.historyContent.innerHTML = filtered.length ? `
     <div class="history-table-wrap">
@@ -243,19 +332,19 @@ function renderHistory() {
         <thead>
           <tr>
             <th>日期</th><th>选题标题</th><th>话题分类</th><th>来源账号</th>
-            <th>推荐IP</th><th>决策阶段</th><th>优先级</th><th>状态</th>
+            <th>来源账号类型</th><th>决策阶段</th><th>选题价值信号</th><th>状态</th>
           </tr>
         </thead>
         <tbody>
           ${filtered.map(topic => `
             <tr tabindex="0" data-topic-index="${topics.indexOf(topic)}" data-date="${esc(state.historyDate)}">
               <td>${esc(state.historyDate)}</td>
-              <td class="history-title">${esc(topic.title)}</td>
-              <td>${esc(topic.category)}</td>
-              <td>${esc(topic.account)}</td>
-              <td>${esc(topic.ip)}</td>
-              <td>${esc(topic.stage)}</td>
-              <td>${esc(topic.priority)}</td>
+              <td class="history-title">${esc(topic.title || "未命名选题")}</td>
+              <td>${esc(topic.category || "未分类")}</td>
+              <td>${esc(topic.account || "未知账号")}</td>
+              <td>${esc(sourceAccountType(topic, dataset))}</td>
+              <td>${esc(topic.stage || "暂无")}</td>
+              <td>${esc(topicValueSignal(topic))}</td>
               <td><span class="history-status">${esc(topicStatus(topic))}</span></td>
             </tr>
           `).join("")}
@@ -272,7 +361,7 @@ function accountCard(account, index) {
     <article class="account-card compact-account-card" tabindex="0" data-account-index="${index}">
       <div class="account-card-head">
         <div>
-          <span class="account-type">${esc(account.type)}</span>
+          <span class="account-type">${esc(normalizeAccountType(account.type))}</span>
           <h3>${esc(account.name)}</h3>
         </div>
         <span class="account-status">${esc(account.status)}</span>
@@ -280,8 +369,8 @@ function accountCard(account, index) {
       <dl class="account-summary">
         <div><dt>内容形态</dt><dd>${esc(accountFormat(account))}</dd></div>
         <div><dt>可借鉴维度</dt><dd>${esc(accountBorrowDimension(account))}</dd></div>
-        <div><dt>适合服务</dt><dd>${esc(accountServiceTarget(account))}</dd></div>
-        <div><dt>最近有效发现</dt><dd>${esc(account.movement)}</dd></div>
+        <div><dt>内容领域</dt><dd>${esc(account.domain || "暂无")}</dd></div>
+        <div><dt>最近有效发现</dt><dd>${esc(account.movement || "暂无观察")}</dd></div>
       </dl>
       <div class="account-card-footer">
         <span>${esc(account.observed)}</span>
@@ -292,27 +381,18 @@ function accountCard(account, index) {
 }
 
 function renderAccountFilters() {
-  const accounts = state.latest.accounts || [];
-  const preferred = ["真人专业型", "真人营销型", "图文资料型", "AI/素材型"];
-  const discovered = [...new Set(accounts.map(account => account.type))];
-  const types = ["全部", ...preferred.filter(type => discovered.includes(type)), ...discovered.filter(type => !preferred.includes(type))];
-
-  elements.accountTypeFilters.innerHTML = types.map(type => `
-    <button class="account-filter ${type === state.accountType ? "active" : ""}" data-account-type="${esc(type)}">${esc(type)}</button>
-  `).join("");
-  elements.accountStatusFilters.innerHTML = ACCOUNT_STATUSES.map(status => `
-    <button class="account-filter ${status === state.accountStatus ? "active" : ""}" data-account-status="${esc(status)}">${esc(status)}</button>
-  `).join("");
+  renderTopicFilters(elements.accountTypeFilters, "data-account-type", state.accountType, ["全部", ...SOURCE_TYPES]);
+  renderTopicFilters(elements.accountStatusFilters, "data-account-status", state.accountStatus, ACCOUNT_STATUSES);
 }
 
 function renderAccounts() {
   const accounts = state.latest.accounts || [];
   const query = state.accountQuery.toLowerCase();
   const filtered = accounts.filter(account => {
-    const typeMatch = state.accountType === "全部" || account.type === state.accountType;
+    const typeMatch = state.accountType === "全部" || normalizeAccountType(account.type) === state.accountType;
     const statusMatch = state.accountStatus === "全部" || account.status === state.accountStatus;
-    const derived = `${accountFormat(account)} ${accountBorrowDimension(account)} ${accountServiceTarget(account)}`.toLowerCase();
-    return typeMatch && statusMatch && `${searchable(account)} ${derived}`.includes(query);
+    const derived = `${normalizeAccountType(account.type)} ${accountFormat(account)} ${accountBorrowDimension(account)}`;
+    return typeMatch && statusMatch && `${searchable(account)} ${derived}`.toLowerCase().includes(query);
   });
 
   elements.accountGrid.innerHTML = filtered.map(account => accountCard(account, accounts.indexOf(account))).join("");
@@ -334,30 +414,28 @@ function block(title, text, className = "") {
   return `<section class="analysis-block ${className}"><h4>${esc(title)}</h4><p>${esc(text)}</p></section>`;
 }
 
-function openTopicDrawer(topic, date) {
+function openTopicDrawer(topic, date, dataset) {
   elements.drawerContent.innerHTML = `
-    <p class="drawer-kicker">${esc(date)} · ${esc(topic.category)} · ${esc(topic.source || "每日监测")} · 第${esc(topic.rank)}条</p>
-    <h2>${esc(topic.title)}</h2>
-    <div class="drawer-meta">
-      <span class="tag">${esc(topic.ip)}</span>
-      <span class="tag">${esc(recommendedSlot(topic))}</span>
-      <span class="tag">${esc(topic.stage)}</span>
-      <span class="tag">${esc(topic.priority)}</span>
-    </div>
+    <p class="drawer-kicker">${esc(date)} · ${esc(topic.source || "每日监测")} · 第${esc(topic.rank || "—")}条</p>
+    <h2>${esc(topic.video || topic.title || "未命名选题")}</h2>
     <div class="source">
-      <strong>原始样本</strong>
-      <div>${esc(topic.account)}｜${esc(topic.video)}<br><a href="${esc(topic.url)}" target="_blank" rel="noopener">打开抖音原视频 ↗</a></div>
+      <strong>原视频链接</strong>
+      <div><a href="${esc(topic.url)}" target="_blank" rel="noopener">打开抖音原视频 ↗</a></div>
     </div>
-    ${block("一句话推荐理由", recommendation(topic))}
-    ${block("公开数据与热度依据", topic.heat)}
-    ${block("目标客群", topic.audience)}
-    ${block("客户真实痛点", topic.pain)}
-    ${block("为什么会火或产生咨询", topic.logic)}
-    ${block("建议改写角度", topic.angle)}
-    ${block("推荐开头", topic.hook, "hook")}
-    ${block("更适合的呈现方式", topic.format)}
-    ${block("转化承接", topic.conversion)}
-    ${block("IP形象与合规风险", topic.risk, "risk")}
+    ${block("来源账号", topic.account || "未知账号")}
+    ${block("来源账号类型", sourceAccountType(topic, dataset))}
+    ${block("话题分类", topic.category || "未分类")}
+    ${block("决策阶段", topic.stage || "暂无")}
+    ${block("选题价值信号", topicValueSignal(topic))}
+    ${block("运营观察", operationObservation(topic))}
+    ${block("公开数据与热度依据", topic.heat || "暂无")}
+    ${block("目标客群", topic.audience || "暂无")}
+    ${block("客户真实痛点", topic.pain || "暂无")}
+    ${block("为什么值得参考", topic.logic || "暂无")}
+    ${block("如何转成港险选题", topic.migration || topic.angle || "暂无")}
+    ${block("适合呈现形式", topic.format || "暂无")}
+    ${block("转化承接方式", topic.conversion || "暂无")}
+    ${block("合规风险", topic.risk || "暂无", "risk")}
     <div class="drawer-footer"><a class="primary-link" href="${esc(topic.url)}" target="_blank" rel="noopener">查看原视频</a></div>
   `;
   openDrawer();
@@ -368,13 +446,12 @@ function openAccountDrawer(account) {
     <p class="drawer-kicker">账号情报 · ${esc(account.observed)} · ${esc(account.source || "每日监测")}</p>
     <h2>${esc(account.name)}</h2>
     <div class="drawer-meta">
-      <span class="tag">${esc(account.type)}</span>
+      <span class="tag">${esc(normalizeAccountType(account.type))}</span>
       <span class="tag">${esc(account.status)}</span>
       <span class="tag">${esc(accountFormat(account))}</span>
     </div>
     ${block("内容领域", account.domain)}
     ${block("可借鉴维度", accountBorrowDimension(account))}
-    ${block("适合服务的IP/账号", accountServiceTarget(account))}
     ${block("为什么关注", account.reason)}
     ${block("最近一次有效发现", account.movement)}
     ${block("代表选题", account.representative)}
@@ -400,11 +477,18 @@ function bindEvents() {
     state.query = event.target.value.trim();
     renderToday();
   });
-  elements.filters.addEventListener("click", event => {
-    const button = event.target.closest("[data-filter]");
+  elements.todayCategoryFilters.addEventListener("click", event => {
+    const button = event.target.closest("[data-today-category]");
     if (!button) return;
-    state.filter = button.dataset.filter;
-    elements.filters.querySelectorAll(".filter").forEach(item => item.classList.toggle("active", item === button));
+    state.todayCategory = button.dataset.todayCategory;
+    renderTodayFilters();
+    renderToday();
+  });
+  elements.todayTypeFilters.addEventListener("click", event => {
+    const button = event.target.closest("[data-today-type]");
+    if (!button) return;
+    state.todayType = button.dataset.todayType;
+    renderTodayFilters();
     renderToday();
   });
   document.querySelector(".app-nav").addEventListener("click", event => {
@@ -417,6 +501,8 @@ function bindEvents() {
     const button = event.target.closest("[data-date]");
     if (!button) return;
     state.historyDate = button.dataset.date;
+    state.historyCategory = "全部";
+    state.historyType = "全部";
     renderHistoryDates();
     elements.historyContent.innerHTML = '<div class="signal-placeholder">正在读取该日期的选题…</div>';
     elements.historyEmpty.style.display = "none";
@@ -431,11 +517,16 @@ function bindEvents() {
     state.historyQuery = event.target.value.trim();
     renderHistory();
   });
-  elements.historyFilters.addEventListener("click", event => {
-    const button = event.target.closest("[data-history-filter]");
+  elements.historyCategoryFilters.addEventListener("click", event => {
+    const button = event.target.closest("[data-history-category]");
     if (!button) return;
-    state.historyFilter = button.dataset.historyFilter;
-    elements.historyFilters.querySelectorAll(".filter").forEach(item => item.classList.toggle("active", item === button));
+    state.historyCategory = button.dataset.historyCategory;
+    renderHistory();
+  });
+  elements.historyTypeFilters.addEventListener("click", event => {
+    const button = event.target.closest("[data-history-type]");
+    if (!button) return;
+    state.historyType = button.dataset.historyType;
     renderHistory();
   });
   elements.accountSearch.addEventListener("input", event => {
@@ -465,9 +556,9 @@ function bindEvents() {
 
 function cacheElements() {
   [
-    "mastMeta", "summaryLabel", "coreJudgment", "selectionTitle", "selectionDetail",
-    "competitionSignals", "topicRadar", "search", "filters", "content", "empty",
-    "historyDates", "historySearch", "historyFilters", "historyContent", "historyEmpty",
+    "mastMeta", "pyramidLabel", "pyramidLevels", "competitionSignals", "topicRadar",
+    "search", "todayCategoryFilters", "todayTypeFilters", "content", "empty",
+    "historyDates", "historySearch", "historyCategoryFilters", "historyTypeFilters", "historyContent", "historyEmpty",
     "accountSearch", "accountTypeFilters", "accountStatusFilters", "accountGrid", "accountEmpty",
     "backdrop", "drawer", "drawerClose", "drawerContent"
   ].forEach(id => { elements[id] = document.getElementById(id); });
@@ -475,9 +566,8 @@ function cacheElements() {
 
 function renderLoadError(error) {
   console.error(error);
-  elements.coreJudgment.textContent = "数据读取失败，请通过网站地址或本地服务器打开页面。";
-  elements.selectionDetail.textContent = error.message;
-  elements.content.innerHTML = '<div class="load-error">未能读取 data/index.json。页面不再内嵌历史数据，因此直接使用 file:// 打开时可能被浏览器阻止。</div>';
+  elements.pyramidLevels.innerHTML = `<div class="load-error">${esc(error.message)}</div>`;
+  elements.content.innerHTML = '<div class="load-error">未能读取 data/index.json。请通过网站地址或本地服务器打开页面。</div>';
 }
 
 async function init() {
@@ -486,8 +576,9 @@ async function init() {
   try {
     await loadData();
     renderMasthead();
-    renderOverview();
+    renderPyramid();
     renderSignals();
+    renderTodayFilters();
     renderToday();
     renderHistoryDates();
     renderHistory();

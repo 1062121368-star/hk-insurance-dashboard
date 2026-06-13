@@ -28,19 +28,17 @@
     </nav>
 
     <section class="view active" id="view-today">
-      <section class="summary" aria-label="今日概览">
-        <div class="lead">
-          <span class="summary-label" id="summaryLabel">今日核心判断</span>
-          <p id="coreJudgment">正在加载最新数据…</p>
+      <section class="topic-pyramid" aria-label="今日选题金字塔">
+        <div class="pyramid-head">
+          <div>
+            <span class="summary-label" id="pyramidLabel">今日选题金字塔</span>
+            <h2>环境不安 → 资金安排 → 方案比较</h2>
+          </div>
+          <p>按客户财富决策成熟度理解今天的外部内容信号，不替团队决定谁来拍或哪条先拍。</p>
         </div>
-      </section>
-
-      <section class="selection-rule" aria-label="当前选题口径">
-        <div>
-          <span class="summary-label">当前选题口径</span>
-          <h2 id="selectionTitle">平台证据优先</h2>
+        <div class="pyramid-levels" id="pyramidLevels">
+          <div class="signal-placeholder">正在读取今日选题层级…</div>
         </div>
-        <p id="selectionDetail">正在读取最新选题口径…</p>
       </section>
 
       <section class="signal-board" aria-label="近期变化信号">
@@ -65,12 +63,15 @@
 
       <div class="toolbar">
         <input id="search" class="search" type="search" placeholder="搜索选题、账号、决策阶段或关键词…">
-        <div class="filters" id="filters">
-          <button class="filter active" data-filter="全部">全部</button>
-          <button class="filter" data-filter="思彤">思彤</button>
-          <button class="filter" data-filter="熙纶">熙纶</button>
-          <button class="filter" data-filter="卡罗">卡罗</button>
-          <button class="filter" data-filter="特老师">特老师</button>
+        <div class="filter-groups">
+          <div class="filter-group">
+            <span>话题分类</span>
+            <div class="filters" id="todayCategoryFilters"></div>
+          </div>
+          <div class="filter-group">
+            <span>来源类型</span>
+            <div class="filters" id="todayTypeFilters"></div>
+          </div>
         </div>
       </div>
 
@@ -85,13 +86,16 @@
       </div>
       <div class="history-toolbar" id="historyDates"></div>
       <div class="toolbar">
-        <input id="historySearch" class="search" type="search" placeholder="搜索历史标题、账号、阶段或推荐IP…">
-        <div class="filters" id="historyFilters">
-          <button class="filter active" data-history-filter="全部">全部</button>
-          <button class="filter" data-history-filter="钱放哪里">钱放哪里</button>
-          <button class="filter" data-history-filter="钱留给什么目标">钱留给什么目标</button>
-          <button class="filter" data-history-filter="港险怎么买、怎么用">港险怎么买、怎么用</button>
-          <button class="filter" data-history-filter="动态专题">动态专题</button>
+        <input id="historySearch" class="search" type="search" placeholder="搜索历史标题、账号、阶段或运营信号…">
+        <div class="filter-groups">
+          <div class="filter-group">
+            <span>话题分类</span>
+            <div class="filters" id="historyCategoryFilters"></div>
+          </div>
+          <div class="filter-group">
+            <span>来源类型</span>
+            <div class="filters" id="historyTypeFilters"></div>
+          </div>
         </div>
       </div>
       <div id="historyContent" aria-live="polite"></div>
