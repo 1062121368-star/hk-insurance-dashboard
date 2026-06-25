@@ -58,6 +58,133 @@ function formatCnDate(date) {
   return `${year}年${Number(month)}月${Number(day)}日`;
 }
 
+function cleanTitleEdge(value) {
+  return String(value || "")
+    .replace(/^[\s"'“”‘’]+|[\s"'“”‘’]+$/g, "")
+    .replace(/[，,。；：\s]+$/g, "")
+    .trim();
+}
+
+function normalizeDisplayText(value) {
+  return cleanTitleEdge(value)
+    .replace(/[“”‘’]/g, "")
+    .replace(/(?:这种强观点题)?还有效$/u, "")
+    .replace(/还在放量$/u, "")
+    .replace(/题还能吸人$/u, "")
+    .replace(/有热度$/u, "")
+    .replace(/还能起量$/u, "")
+    .replace(/还能跑$/u, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function inferTopicSubject(text) {
+  const source = String(text || "");
+  const subjectRules = [
+    [/港卡/u, "港卡"],
+    [/香港银行|银行开户|开户/u, "香港开户"],
+    [/香港存钱|存香港|香港定存|定存/u, "香港存钱"],
+    [/美元资产|美元/u, "美元资产"],
+    [/教育金/u, "教育金"],
+    [/婚前/u, "婚前资产"],
+    [/养老|退休|现金流/u, "养老规划"],
+    [/港险|储蓄险|保单/u, "港险"],
+    [/中产/u, "中产资产配置"],
+    [/离岸人民币|在岸人民币/u, "离岸人民币"],
+  ];
+  for (const [rule, label] of subjectRules) {
+    if (rule.test(source)) return label;
+  }
+  return "";
+}
+
+function cleanVideoTitle(value) {
+  return String(value || "")
+    .replace(/^第\d+集\s*[|｜]\s*/u, "")
+    .replace(/#\S+/gu, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/[|｜]\s*$/u, "")
+    .trim();
+}
+
+function compactTopicTitle(topic) {
+  const raw = String(
+    topic?.displayTitle
+    || topic?.shortTitle
+    || topic?.compactTitle
+    || topic?.title
+    || topic?.video
+    || ""
+  ).trim();
+  if (!raw) return "未命名选题";
+
+  const normalized = raw
+    .replace(/^\d{4}(?:年|[-/.])\d{1,2}(?:月|[-/.])\d{1,2}日?/u, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const extractionRules = [
+    /不是[“"'‘’](.+?)[”"'’][，,]\s*而是[“"'‘’](.+?)[”"'’]/u,
+    /更有效的是[“"'‘’]?(.+?)[”"'’]?[，,]?\s*而不是/u,
+    /(?:真正|更)(?:值得拍|值得借|该借|该拍|有价值|重要|能用的改写)的是[“"'‘’](.+?)[”"'’]/u,
+    /(?:用户|大家)真(?:正)?(?:在问|想问)的是[“"'‘’](.+?)[”"'’]/u,
+    /真正能承接的是[“"'‘’]?(.+?)[”"'’]?$/u,
+    /适合承接[“"'‘’]?(.+?)[”"'’]?$/u,
+    /必须补上(.+)$/u,
+    /(?:改成|必须立刻接到)[“"'‘’](.+?)[”"'’]/u,
+    /本质不是.+?[，,]\s*而是大家在找[“"'‘’](.+?)[”"'’]/u,
+    /真正高意向的是(.+)$/u,
+    /真正重要的是(.+)$/u,
+    /用户要的不是.+?[，,]\s*是(.+)$/u,
+  ];
+
+  for (const rule of extractionRules) {
+    const match = normalized.match(rule);
+    if (!match) continue;
+    const candidate = normalizeDisplayText(match[2] || match[1]);
+    if (candidate) {
+      const refined = candidate
+        .replace(/办完以后/g, "办完后")
+        .replace(/卡到手以后/g, "卡到手后")
+        .replace(/这张卡到底/g, "这张卡")
+        .replace(/到底/g, "")
+        .replace(/，{2,}/g, "，")
+        .trim();
+      if (refined.length >= 6 && !/^(判断框架|信息差|口号|安全感表达|话术入口)$/u.test(refined)) {
+        return refined;
+      }
+      const subject = inferTopicSubject(normalized);
+      return subject ? `${subject}${refined}` : refined;
+    }
+  }
+
+  const questionMatch = normalized.match(/^(.+?[？?])/u);
+  if (questionMatch?.[1]) return normalizeDisplayText(questionMatch[1]);
+
+  for (const marker of ["，但", "，这类题", "，这类", "，说明", "，今天还", "，今天更", "，今天已经", "，用户"]) {
+    if (normalized.includes(marker)) return normalizeDisplayText(normalized.split(marker)[0]);
+  }
+
+  return normalizeDisplayText(normalized);
+}
+
+function topicDisplayTitle(topic) {
+  return compactTopicTitle(topic);
+}
+
+function topicJudgment(topic) {
+  const displayTitle = topicDisplayTitle(topic);
+  const titleText = cleanTitleEdge(topic?.title || "");
+  if (titleText && titleText !== displayTitle) return titleText;
+  const logicText = cleanTitleEdge(topic?.logic || "");
+  if (logicText && logicText !== displayTitle) return logicText;
+  return "";
+}
+
+function topicSampleTitle(topic) {
+  return cleanVideoTitle(topic?.video || "");
+}
+
 function normalizeAccountType(value) {
   const text = String(value || "").trim();
   if (!text) return "未分类";
@@ -235,6 +362,9 @@ function renderHistoryFilters(dataset) {
 }
 
 function topicCard(topic, index, date, dataset) {
+  const displayTitle = topicDisplayTitle(topic);
+  const sampleTitle = topicSampleTitle(topic);
+  const judgment = topicJudgment(topic);
   return `
     <article class="card intelligence-card" tabindex="0" data-topic-index="${index}" data-date="${esc(date)}">
       <div class="card-body">
@@ -243,11 +373,14 @@ function topicCard(topic, index, date, dataset) {
           <span class="tag">${esc(topic.account || "未知账号")}</span>
           <span class="tag">${esc(sourceAccountType(topic, dataset))}</span>
         </div>
-        <h3>${esc(topic.title || "未命名选题")}</h3>
+        <span class="card-label">建议标题</span>
+        <h3 title="${esc(topic.title || "未命名选题")}">${esc(displayTitle)}</h3>
+        ${sampleTitle ? `<p class="video-caption"><strong>原视频标题</strong>${esc(sampleTitle)}</p>` : ""}
         <dl class="intelligence-grid">
           <div><dt>决策阶段</dt><dd>${esc(topic.stage || "暂无")}</dd></div>
           <div><dt>选题价值信号</dt><dd>${esc(topicValueSignal(topic))}</dd></div>
         </dl>
+        ${judgment ? `<p class="title-analysis"><strong>入库判断</strong>${esc(judgment)}</p>` : ""}
         <p class="operation-observation"><strong>运营观察</strong>${esc(operationObservation(topic))}</p>
         <div class="card-bottom">
           ${topic.source === "临时洞察" ? '<span class="tag">临时洞察</span>' : ""}
@@ -331,7 +464,7 @@ function renderHistory() {
       <table class="history-table">
         <thead>
           <tr>
-            <th>日期</th><th>选题标题</th><th>话题分类</th><th>来源账号</th>
+            <th>日期</th><th>建议标题</th><th>话题分类</th><th>来源账号</th>
             <th>来源账号类型</th><th>决策阶段</th><th>选题价值信号</th><th>状态</th>
           </tr>
         </thead>
@@ -339,7 +472,7 @@ function renderHistory() {
           ${filtered.map(topic => `
             <tr tabindex="0" data-topic-index="${topics.indexOf(topic)}" data-date="${esc(state.historyDate)}">
               <td>${esc(state.historyDate)}</td>
-              <td class="history-title">${esc(topic.title || "未命名选题")}</td>
+              <td class="history-title" title="${esc(topicJudgment(topic) || topic.title || "未命名选题")}">${esc(topicDisplayTitle(topic))}</td>
               <td>${esc(topic.category || "未分类")}</td>
               <td>${esc(topic.account || "未知账号")}</td>
               <td>${esc(sourceAccountType(topic, dataset))}</td>
@@ -415,16 +548,24 @@ function block(title, text, className = "") {
 }
 
 function openTopicDrawer(topic, date, dataset) {
+  const displayTitle = topicDisplayTitle(topic);
+  const judgment = topicJudgment(topic);
+  const sampleTitle = topicSampleTitle(topic);
   elements.drawerContent.innerHTML = `
     <p class="drawer-kicker">${esc(date)} · ${esc(topic.source || "每日监测")} · 第${esc(topic.rank || "—")}条</p>
-    <h2>${esc(topic.video || topic.title || "未命名选题")}</h2>
+    <h2>${esc(displayTitle)}</h2>
+    <div class="drawer-meta">
+      <span class="tag">${esc(topic.category || "未分类")}</span>
+      <span class="tag">${esc(topic.account || "未知账号")}</span>
+      <span class="tag">${esc(sourceAccountType(topic, dataset))}</span>
+    </div>
     <div class="source">
-      <strong>原视频链接</strong>
+      <strong>原视频来源</strong>
       <div><a href="${esc(topic.url)}" target="_blank" rel="noopener">打开抖音原视频 ↗</a></div>
     </div>
-    ${block("来源账号", topic.account || "未知账号")}
-    ${block("来源账号类型", sourceAccountType(topic, dataset))}
-    ${block("话题分类", topic.category || "未分类")}
+    ${block("建议标题", displayTitle)}
+    ${sampleTitle ? block("原视频标题", sampleTitle) : ""}
+    ${judgment ? block("入库判断", judgment) : ""}
     ${block("决策阶段", topic.stage || "暂无")}
     ${block("选题价值信号", topicValueSignal(topic))}
     ${block("运营观察", operationObservation(topic))}

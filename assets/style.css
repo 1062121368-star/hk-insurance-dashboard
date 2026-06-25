@@ -297,6 +297,29 @@ h1 {
   letter-spacing: -.025em;
   text-wrap: balance;
 }
+.card-label {
+  display: inline-block;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+.video-caption,
+.title-analysis {
+  margin: 0 0 14px;
+  color: #495565;
+  font-size: 11px;
+  line-height: 1.65;
+}
+.video-caption strong,
+.title-analysis strong {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--ink);
+  font-size: 9px;
+  letter-spacing: .08em;
+}
 .evidence { margin: 0 0 13px; color: #3e4958; font-size: 13px; line-height: 1.65; }
 .card-insight {
   display: grid;
